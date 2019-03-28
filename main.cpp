@@ -14,12 +14,12 @@ double gap_opening_penalty = 1;
 double gap_continuing_penalty = 1;
 
 string fasta_path = "example_data/small/myfasta.fasta";
-//string fastq_path = "example_data/small/myfastq_orig.fastq";
-string fastq_path = "example_data/small/myfastq.fastq";
+string fastq_path = "example_data/small/myfastq_orig.fastq";
+//string fastq_path = "example_data/small/myfastq.fastq";
 const char *database_path = "database.sqlite";
 
-using Record = std::vector<std::string>;
-using Records = std::vector<Record>;
+using Record = vector<string>;
+using Records = vector<Record>;
 
 int select_callback(void *p_data, int num_fields, char **p_fields, char **p_col_names) {
 	Records *records = static_cast<Records *>(p_data);
@@ -40,9 +40,6 @@ Records select_stmt(const char *stmt, sqlite3 *db) {
 	if (ret != SQLITE_OK) {
 		std::cerr << "Error in select statement " << stmt << "[" << errmsg << "]\n";
 	}
-//    else {
-//        std::cerr << records.size() << " records returned.\n";
-//    }
 
 	return records;
 }
@@ -188,15 +185,13 @@ int main() {
 			kmer = fastqLine.substr(0, kmer_size);
 
 			// Get id of database row where kmer exists (less expensive option because O(log n) )
-			// TODO: remove % before kmer so that lookup is quicker
-			sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '%" + kmer + "%';";
+			sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '" + kmer + "%';";
 			Records fastaLine_ids = select_stmt(sql_command.c_str(), db);
 
-			// TODO: enable this if ids == 0
-			if (fastaLine_ids.size() == 0) {
-//				using more expensive O(n) kmer search if can't find kmer with cheaper option
-//				sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '%" + kmer + "%';";
-//				Records fastaLine_ids2 = select_stmt(sql_command.c_str(), db);
+			if (fastaLine_ids.data() == 0x0) {
+				// using more expensive O(n) kmer search if can't find kmer with cheaper option
+				sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '%" + kmer + "%';";
+				fastaLine_ids = select_stmt(sql_command.c_str(), db);
 			} else if (fastaLine_ids.size() > 1) {
 				cout << "more than 1 read with provided kmer size, please consider increasing kmer_size parameter"
 				     << endl;
