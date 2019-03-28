@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
@@ -7,6 +8,7 @@
 #include "cxxopts.hpp"
 
 using namespace std;
+auto start = chrono::steady_clock::now();
 
 string fasta_path = "example_data/small/myfasta.fasta";
 string fastq_path = "example_data/small/myfastq_orig.fastq";
@@ -177,20 +179,12 @@ int main(int argc, char *argv[]) {
 	::gap_opening_penalty = result["gap-open"].as<int>();
 	::gap_continuing_penalty = result["gap-extend"].as<int>();
 
+
 	sqlite3 *db;
 	string sql_command;
 
 	// Set db to be the connection to the database
 	sqlite3_open(database_path, &db);
-
-	// Delete previously made tables
-	sql_command = "DROP TABLE ref_table;";
-	sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
-
-	// Create database schema
-	sql_command = "CREATE TABLE IF NOT EXISTS ref_table(id INTEGER PRIMARY KEY  AUTOINCREMENT, quant INTEGER, header TEXT, transcripts VARCHAR(80));";
-	sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
-
 
 	ifstream fasta_file(fasta_path);
 	ifstream fastq_file(fastq_path);
@@ -205,22 +199,23 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	string line;
-	string current_header;
-	while (getline(fasta_file, line)) {
-		if (line[0] == '>') {
-			line = line.substr(1, line.size());
-			line = regex_replace(line, regex("^ "), "");
-			line = regex_replace(line, regex(" +"), " ");
-			current_header = line;
+		string line;
+		string current_header;
+		while (getline(fasta_file, line)) {
+			if (line[0] == '>') {
+				line = line.substr(1, line.size());
+				line = regex_replace(line, regex("^ "), "");
+				line = regex_replace(line, regex(" +"), " ");
+				current_header = line;
 
-		} else {
-			sql_command =
-					"INSERT INTO ref_table (transcripts, quant, header) VALUES ('" + line + "',0,'" + current_header +
-					"');";
-			sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+			} else {
+				sql_command =
+						"INSERT INTO ref_table (transcripts, quant, header) VALUES ('" + line + "',0,'" +
+						current_header +
+						"');";
+				sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+			}
 		}
-	}
 
 	// Index database for log n lookup times
 	sql_command = "CREATE INDEX index_name ON ref_table (transcripts);";
@@ -246,7 +241,7 @@ int main(int argc, char *argv[]) {
 				fastaLine_ids = select_stmt(sql_command.c_str(), db);
 			} else if (fastaLine_ids.size() > 1) {
 				cout << "more than 1 read with provided kmer size, please consider increasing kmer_size parameter"
-				     << endl;
+						<< endl;
 			}
 			for (auto fastaLine_id : fastaLine_ids) {
 				sql_command = "SELECT transcripts FROM ref_table WHERE id=" + (string) fastaLine_id[0] + ";";
@@ -287,14 +282,14 @@ int main(int argc, char *argv[]) {
 							int gapSize = fasta_line_offset_test; // returns size of gap
 							auto x = fastaLine.substr(0, fasta_rel_pos);
 							fastaLine = fastaLine.substr(0, fasta_rel_pos) + insert_char_x_times('-', gapSize) +
-							            fastaLine.substr(fasta_rel_pos, fastaLine.length());
+									fastaLine.substr(fasta_rel_pos, fastaLine.length());
 							matched_seq_fasta += "-";
 							matched_seq_fastq += fastqLine[fastq_rel_pos];
 
 						} else if (fastq_line_offset_test > 0) {
 							int gapSize = fastq_line_offset_test; // returns size of gap
 							fastqLine = fastqLine.substr(0, fastq_rel_pos) + insert_char_x_times('-', gapSize) +
-							            fastqLine.substr(fastq_rel_pos, fastqLine.length());
+									fastqLine.substr(fastq_rel_pos, fastqLine.length());
 							matched_seq_fastq += "-";
 							matched_seq_fasta += fastaLine[fasta_rel_pos];
 
@@ -305,20 +300,22 @@ int main(int argc, char *argv[]) {
 					}
 
 
+					double my_penalty = calculate_penalty(matched_seq_fasta, matched_seq_fastq);
 
-				double my_penalty = calculate_penalty(matched_seq_fasta, matched_seq_fastq);
+					if (my_penalty < penalty_cutoff) {
+						double my_similarity = calculate_similarity(matched_seq_fasta, matched_seq_fastq);
+						similarity_scores.push_back(my_similarity);
+						if (verbosity_level > 2) {
+							cout << "\nPenalty : " << to_string(my_penalty) << endl;
+							cout << "Similarity : " << to_string(my_similarity) << endl;
+							cout << matched_seq_fastq << endl;
+							cout << matched_seq_fasta << endl;
+						}
 
-				if (my_penalty < penalty_cutoff) {
-					double my_similarity = calculate_similarity(matched_seq_fasta, matched_seq_fastq);
-					similarity_scores.push_back(my_similarity);
-					cout << "\nPenalty : " << to_string(my_penalty) << endl;
-					cout << matched_seq_fastq << endl;
-					cout << matched_seq_fasta << endl;
-
-					string fastaLine_id_str = fastaLine_id.at(0);
-					sql_command = "UPDATE ref_table SET quant = quant + 1 WHERE id=" + fastaLine_id_str + ";";
-					sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
-				}
+						string fastaLine_id_str = fastaLine_id.at(0);
+						sql_command = "UPDATE ref_table SET quant = quant + 1 WHERE id=" + fastaLine_id_str + ";";
+						sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+					}
 				}
 			}
 		}
@@ -345,7 +342,16 @@ int main(int argc, char *argv[]) {
 	cout << "Aligned Read rate: " << aligned_reads_rate << "%" << endl;
 
 	sqlite3_close(db);
+	auto end = chrono::steady_clock::now();
+	auto time_diff = end - start;
+	if (verbosity_level == 1) {
+		cout << ::kmer_size << "," << ::max_gap_size << "," << ::penalty_cutoff << "," << ::mismatch_penalty << ","
+		     << ::gap_opening_penalty << "," << ::gap_continuing_penalty << ","
+		     << similarity_scores_sum / similarity_scores_len << "," << aligned_reads_rate << ","
+		     << chrono::duration<double, milli>(time_diff).count() << endl;
+	}
 
 }
+
 
 
