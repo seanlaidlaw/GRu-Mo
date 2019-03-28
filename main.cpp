@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <regex>
 #include <sqlite3.h>
 
 using namespace std;
@@ -17,6 +18,7 @@ string fasta_path = "example_data/small/myfasta.fasta";
 string fastq_path = "example_data/small/myfastq_orig.fastq";
 //string fastq_path = "example_data/small/myfastq.fastq";
 const char *database_path = "database.sqlite";
+vector<double> similarity_scores;
 
 using Record = vector<string>;
 using Records = vector<Record>;
@@ -80,6 +82,32 @@ double calculate_penalty(string sequenceA, string sequenceB) {
 	}
 
 	return current_score;
+}
+
+
+double calculate_similarity(string sequenceA, string sequenceB) {
+	double matched_nucleotides = 0;
+	unsigned int lenA = sequenceA.size();
+	unsigned int lenB = sequenceB.size();
+	int smallest_len = lenA;
+	int longest_len = lenB;
+	if (lenB < lenA)
+		smallest_len = lenB;
+	longest_len = lenA;
+
+	for (int i = 0; i < smallest_len; ++i) {
+		char a = sequenceA[i];
+		char b = sequenceB[i];
+
+		if (a != '-' and b != '-') {
+			if (a == b) {
+				matched_nucleotides += 1;
+			}
+		}
+	}
+	double similarity = 100 * (matched_nucleotides / longest_len);
+
+	return similarity;
 }
 
 bool offset_gap_exists(int gapSize, string sequenceA, int seqA_rel_pos, string sequenceB, int seqB_rel_pos) {
@@ -163,7 +191,11 @@ int main() {
 	string current_header;
 	while (getline(fasta_file, line)) {
 		if (line[0] == '>') {
+			line = line.substr(1, line.size());
+			line = regex_replace(line, regex("^ "), "");
+			line = regex_replace(line, regex(" +"), " ");
 			current_header = line;
+
 		} else {
 			sql_command =
 					"INSERT INTO ref_table (transcripts, quant, header) VALUES ('" + line + "',0,'" + current_header +
@@ -177,10 +209,12 @@ int main() {
 	sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
 
 	int line_counter = 0;
+	int read_counter = 0;
 	string fastqLine;
 	while (getline(fastq_file, fastqLine)) {
 		line_counter += 1;
 		if (line_counter % 4 == 2) {
+			read_counter += 1;
 			string kmer;
 			kmer = fastqLine.substr(0, kmer_size);
 
@@ -257,6 +291,8 @@ int main() {
 				double my_penalty = calculate_penalty(matched_seq_fasta, matched_seq_fastq);
 
 				if (my_penalty < penalty_cutoff) {
+					double my_similarity = calculate_similarity(matched_seq_fasta, matched_seq_fastq);
+					similarity_scores.push_back(my_similarity);
 					cout << "\nPenalty : " << to_string(my_penalty) << endl;
 					cout << matched_seq_fastq << endl;
 					cout << matched_seq_fasta << endl;
@@ -273,10 +309,22 @@ int main() {
 	// Print quantification scores
 	sql_command = "SELECT header,SUM(quant) FROM ref_table GROUP BY header;";
 	Records quant_scores = select_stmt(sql_command.c_str(), db);
-	cout << "\n Scores:" << endl;
+	cout << "\nScores:" << endl;
 	for (Record score : quant_scores) {
-		cout << score.at(0) << "\t" << score.at(1) << endl;
+		cout << score.at(1) << "\t" << score.at(0) << endl;
 	}
+
+	int similarity_scores_len = similarity_scores.size();
+	double similarity_scores_sum;
+	for (double score : similarity_scores) {
+		similarity_scores_sum += score;
+	}
+	cout << "\nAverage similarity score for the run: " << similarity_scores_sum / similarity_scores_len << "%" << endl;
+
+	sql_command = "SELECT SUM(quant) FROM ref_table WHERE quant>0;";
+	Records aligned_reads = select_stmt(sql_command.c_str(), db);
+	double aligned_reads_rate = 100 * stod(aligned_reads.at(0).at(0)) / (double) read_counter;
+	cout << "Aligned Read rate: " << aligned_reads_rate << "%" << endl;
 
 	sqlite3_close(db);
 
