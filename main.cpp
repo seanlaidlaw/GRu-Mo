@@ -4,21 +4,22 @@
 #include <vector>
 #include <regex>
 #include <sqlite3.h>
+#include "cxxopts.hpp"
 
 using namespace std;
-
-double kmer_size = 24;
-double max_gap_size = 7;
-double penalty_cutoff = 25;
-double mismatch_penalty = 2;
-double gap_opening_penalty = 1;
-double gap_continuing_penalty = 1;
 
 string fasta_path = "example_data/small/myfasta.fasta";
 string fastq_path = "example_data/small/myfastq_orig.fastq";
 //string fastq_path = "example_data/small/myfastq.fastq";
 const char *database_path = "database.sqlite";
 vector<double> similarity_scores;
+
+double kmer_size;
+double max_gap_size;
+double penalty_cutoff;
+double mismatch_penalty;
+double gap_opening_penalty;
+double gap_continuing_penalty;
 
 using Record = vector<string>;
 using Records = vector<Record>;
@@ -158,7 +159,24 @@ static int callback(void *NotUsed, int argc, char **argv, char **azColName) {
 }
 
 
-int main() {
+int main(int argc, char *argv[]) {
+	cxxopts::Options options("MyProgram", "One line description of MyProgram");
+	options.add_options()
+			("k,kmer-size", "kmer size to search fasta", cxxopts::value<int>())
+			("c,cutoff", "cutoff above which read with this penalty won't be quantified", cxxopts::value<int>())
+			("g,max-gap", "maximum gapsize to look for gaps", cxxopts::value<int>())
+			("m,mismatch", "penalty for nucleotide mismatch", cxxopts::value<int>())
+			("o,gap-open", "penalty for opening a gap", cxxopts::value<int>())
+			("e,gap-extend", "penalty for extending a gap", cxxopts::value<int>());
+
+	auto result = options.parse(argc, argv);
+	::kmer_size = result["kmer-size"].as<int>();
+	::max_gap_size = result["max-gap"].as<int>();
+	::penalty_cutoff = result["cutoff"].as<int>();
+	::mismatch_penalty = result["mismatch"].as<int>();
+	::gap_opening_penalty = result["gap-open"].as<int>();
+	::gap_continuing_penalty = result["gap-extend"].as<int>();
+
 	sqlite3 *db;
 	string sql_command;
 
