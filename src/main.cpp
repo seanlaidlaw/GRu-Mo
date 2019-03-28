@@ -16,6 +16,8 @@ string fastq_path = "example_data/small/myfastq_orig.fastq";
 const char *database_path = "database.sqlite";
 vector<double> similarity_scores;
 
+bool skip_database_creation;
+int verbosity_level;
 double kmer_size;
 double max_gap_size;
 double penalty_cutoff;
@@ -94,9 +96,10 @@ double calculate_similarity(string sequenceA, string sequenceB) {
 	unsigned int lenB = sequenceB.size();
 	int smallest_len = lenA;
 	int longest_len = lenB;
-	if (lenB < lenA)
+	if (lenB < lenA) {
 		smallest_len = lenB;
-	longest_len = lenA;
+		longest_len = lenA;
+	}
 
 	for (int i = 0; i < smallest_len; ++i) {
 		char a = sequenceA[i];
@@ -164,6 +167,10 @@ static int callback(void *NotUsed, int argc, char **argv, char **azColName) {
 int main(int argc, char *argv[]) {
 	cxxopts::Options options("MyProgram", "One line description of MyProgram");
 	options.add_options()
+			("skip-db", "Skip fasta parsing and database construction", cxxopts::value<bool>()->default_value("false"))
+			("v,verbose",
+			 "Set verbosity level, 0 is no output, 1 is CSV of results, 2 is quant scores, 3 is read alignment",
+			 cxxopts::value<int>()->default_value("3"))
 			("k,kmer-size", "kmer size to search fasta", cxxopts::value<int>())
 			("c,cutoff", "cutoff above which read with this penalty won't be quantified", cxxopts::value<int>())
 			("g,max-gap", "maximum gapsize to look for gaps", cxxopts::value<int>())
@@ -172,6 +179,8 @@ int main(int argc, char *argv[]) {
 			("e,gap-extend", "penalty for extending a gap", cxxopts::value<int>());
 
 	auto result = options.parse(argc, argv);
+	::skip_database_creation = result["skip-db"].as<bool>();
+	::verbosity_level = result["verbose"].as<int>();
 	::kmer_size = result["kmer-size"].as<int>();
 	::max_gap_size = result["max-gap"].as<int>();
 	::penalty_cutoff = result["cutoff"].as<int>();
@@ -199,6 +208,19 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	sql_command = "UPDATE ref_table SET quant = 0 WHERE quant!=0;";
+	sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+
+	if (::skip_database_creation == false) {
+		// Delete previously made tables
+		sql_command = "DROP TABLE ref_table;";
+		sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+
+		// Create database schema
+		sql_command = "CREATE TABLE IF NOT EXISTS ref_table(id INTEGER PRIMARY KEY  AUTOINCREMENT, quant INTEGER, header TEXT, transcripts VARCHAR(80));";
+		sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+
+
 		string line;
 		string current_header;
 		while (getline(fasta_file, line)) {
@@ -217,9 +239,10 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
-	// Index database for log n lookup times
-	sql_command = "CREATE INDEX index_name ON ref_table (transcripts);";
-	sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+		// Index database for log n lookup times
+		sql_command = "CREATE INDEX index_name ON ref_table (transcripts);";
+		sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+	}
 
 	int line_counter = 0;
 	int read_counter = 0;
@@ -322,11 +345,13 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Print quantification scores
-	sql_command = "SELECT header,SUM(quant) FROM ref_table GROUP BY header;";
-	Records quant_scores = select_stmt(sql_command.c_str(), db);
-	cout << "\nScores:" << endl;
-	for (Record score : quant_scores) {
-		cout << score.at(1) << "\t" << score.at(0) << endl;
+	if (verbosity_level > 1) {
+		sql_command = "SELECT header,SUM(quant) FROM ref_table GROUP BY header;";
+		Records quant_scores = select_stmt(sql_command.c_str(), db);
+		cout << "\nScores:" << endl;
+		for (Record score : quant_scores) {
+			cout << score.at(1) << "\t" << score.at(0) << endl;
+		}
 	}
 
 	int similarity_scores_len = similarity_scores.size();
@@ -334,12 +359,16 @@ int main(int argc, char *argv[]) {
 	for (double score : similarity_scores) {
 		similarity_scores_sum += score;
 	}
-	cout << "\nAverage similarity score for the run: " << similarity_scores_sum / similarity_scores_len << "%" << endl;
 
 	sql_command = "SELECT SUM(quant) FROM ref_table WHERE quant>0;";
 	Records aligned_reads = select_stmt(sql_command.c_str(), db);
 	double aligned_reads_rate = 100 * stod(aligned_reads.at(0).at(0)) / (double) read_counter;
-	cout << "Aligned Read rate: " << aligned_reads_rate << "%" << endl;
+
+	if (verbosity_level > 1) {
+		cout << "\nAverage similarity score for the run: " << similarity_scores_sum / similarity_scores_len << "% "
+		     << similarity_scores_sum << "/" << similarity_scores_len << endl;
+		cout << "Aligned Read rate: " << aligned_reads_rate << "%" << endl;
+	}
 
 	sqlite3_close(db);
 	auto end = chrono::steady_clock::now();
