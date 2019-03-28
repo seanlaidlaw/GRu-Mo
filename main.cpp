@@ -14,7 +14,8 @@ double gap_opening_penalty = 1;
 double gap_continuing_penalty = 1;
 
 string fasta_path = "example_data/small/myfasta.fasta";
-string fastq_path = "example_data/small/myfastq_orig.fastq";
+//string fastq_path = "example_data/small/myfastq_orig.fastq";
+string fastq_path = "example_data/small/myfastq.fastq";
 const char *database_path = "database.sqlite";
 
 using Record = std::vector<std::string>;
@@ -139,6 +140,10 @@ int main() {
 	// Set db to be the connection to the database
 	sqlite3_open(database_path, &db);
 
+	// Delete previously made tables
+	sql_command = "DROP TABLE ref_table;";
+	sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+
 	// Create database schema
 	sql_command = "CREATE TABLE IF NOT EXISTS ref_table(id INTEGER PRIMARY KEY  AUTOINCREMENT, quant INTEGER, header TEXT, transcripts VARCHAR(80));";
 	sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
@@ -183,19 +188,20 @@ int main() {
 			kmer = fastqLine.substr(0, kmer_size);
 
 			// Get id of database row where kmer exists (less expensive option because O(log n) )
-			sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '" + kmer + "%';";
+			// TODO: remove % before kmer so that lookup is quicker
+			sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '%" + kmer + "%';";
 			Records fastaLine_ids = select_stmt(sql_command.c_str(), db);
 
-			if (fastaLine_ids.empty()) {
-				//using more expensive O(n) kmer search if can't find kmer with cheaper option
-				sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '%" + kmer + "%';";
-				Records fastaLine_ids = select_stmt(sql_command.c_str(), db);
+			// TODO: enable this if ids == 0
+			if (fastaLine_ids.size() == 0) {
+//				using more expensive O(n) kmer search if can't find kmer with cheaper option
+//				sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '%" + kmer + "%';";
+//				Records fastaLine_ids2 = select_stmt(sql_command.c_str(), db);
 			} else if (fastaLine_ids.size() > 1) {
 				cout << "more than 1 read with provided kmer size, please consider increasing kmer_size parameter"
 				     << endl;
 			}
 			for (auto fastaLine_id : fastaLine_ids) {
-				// do something with your records
 				sql_command = "SELECT transcripts FROM ref_table WHERE id=" + (string) fastaLine_id[0] + ";";
 				Records fastaLine_seqs = select_stmt(sql_command.c_str(), db);
 				for (auto &fastaLine_seq : fastaLine_seqs) {
@@ -218,8 +224,8 @@ int main() {
 						fastaLine = fastaLine + next_fastaLine_str;
 					}
 
+					for (int i = kmer_size; i < read_length; i++) {
 
-					for (int i = kmer_size; i < read_length; ++i) {
 						int fastq_rel_pos = i;
 						int fasta_rel_pos = fastq_rel_pos + align_start;
 
@@ -230,34 +236,40 @@ int main() {
 							matched_seq_fastq += fastaLine[fastq_rel_pos];
 							matched_seq_fasta += fastaLine[fastq_rel_pos];
 
-						} else if (fasta_line_offset_test) {
+						} else if (fasta_line_offset_test > 0) {
 							int gapSize = fasta_line_offset_test; // returns size of gap
+							auto x = fastaLine.substr(0, fasta_rel_pos);
 							fastaLine = fastaLine.substr(0, fasta_rel_pos) + insert_char_x_times('-', gapSize) +
 							            fastaLine.substr(fasta_rel_pos, fastaLine.length());
 							matched_seq_fasta += "-";
 							matched_seq_fastq += fastqLine[fastq_rel_pos];
-						} else if (fastq_line_offset_test) {
+
+						} else if (fastq_line_offset_test > 0) {
 							int gapSize = fastq_line_offset_test; // returns size of gap
 							fastqLine = fastqLine.substr(0, fastq_rel_pos) + insert_char_x_times('-', gapSize) +
 							            fastqLine.substr(fastq_rel_pos, fastqLine.length());
 							matched_seq_fastq += "-";
 							matched_seq_fasta += fastaLine[fasta_rel_pos];
-						} else  // mismatch
+
+						} else { // mismatch
 							matched_seq_fasta += fastaLine[fasta_rel_pos];
-						matched_seq_fastq += fastqLine[fastq_rel_pos];
-
-						double my_penalty = calculate_penalty(matched_seq_fasta, matched_seq_fastq);
-
-						if (my_penalty < penalty_cutoff) {
-							cout << "\nPenalty : " << to_string(my_penalty) << endl;
-							cout << matched_seq_fastq << endl;
-							cout << matched_seq_fasta << endl;
-
-							string fastaLine_id_str = fastaLine_id.at(0);
-							sql_command = "UPDATE ref_table SET quant = quant + 1 WHERE id=" + fastaLine_id_str + ";";
-							sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+							matched_seq_fastq += fastqLine[fastq_rel_pos];
 						}
 					}
+
+
+
+				double my_penalty = calculate_penalty(matched_seq_fasta, matched_seq_fastq);
+
+				if (my_penalty < penalty_cutoff) {
+					cout << "\nPenalty : " << to_string(my_penalty) << endl;
+					cout << matched_seq_fastq << endl;
+					cout << matched_seq_fasta << endl;
+
+					string fastaLine_id_str = fastaLine_id.at(0);
+					sql_command = "UPDATE ref_table SET quant = quant + 1 WHERE id=" + fastaLine_id_str + ";";
+					sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
+				}
 				}
 			}
 		}
