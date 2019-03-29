@@ -247,7 +247,7 @@ int main(int argc, char *argv[]) {
 		sqlite3_exec(db, "END TRANSACTION", NULL, NULL, NULL);
 
 		// Index database for log n lookup times
-		sql_command = "CREATE INDEX index_name ON ref_table (transcripts);";
+		sql_command = "CREATE INDEX transcript_index ON ref_table (transcripts);CREATE INDEX id_index ON ref_table (id);";
 		sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
 	}
 
@@ -270,9 +270,6 @@ int main(int argc, char *argv[]) {
 				// using more expensive O(n) kmer search if can't find kmer with cheaper option
 				sql_command = "SELECT id FROM ref_table WHERE transcripts LIKE '%" + kmer + "%';";
 				fastaLine_ids = select_stmt(sql_command.c_str(), db);
-			} else if (fastaLine_ids.size() > 1) {
-				cout << "more than 1 read with provided kmer size, please consider increasing kmer_size parameter"
-						<< endl;
 			}
 			for (auto fastaLine_id : fastaLine_ids) {
 				sql_command = "SELECT transcripts FROM ref_table WHERE id=" + (string) fastaLine_id[0] + ";";
@@ -376,7 +373,7 @@ int main(int argc, char *argv[]) {
 		if (verbosity_level > 1) {
 			cout << "\nAverage similarity score for the run: " << similarity_scores_sum / similarity_scores_len << "% "
 			     << similarity_scores_sum << "/" << similarity_scores_len << endl;
-			cout << "Aligned Read rate: " << aligned_reads_rate << "%" << endl;
+			cout << "Aligned Read rate: " << aligned_reads_rate << "% \t Time: ";
 		}
 
 		if (verbosity_level == 1) {
@@ -390,7 +387,7 @@ int main(int argc, char *argv[]) {
 
 	auto end = chrono::steady_clock::now();
 	auto time_diff = end - start;
-	if (verbosity_level == 1) {
+	if (verbosity_level > 0) {
 		cout << chrono::duration<double, milli>(time_diff).count() << endl;
 	}
 
