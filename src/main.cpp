@@ -10,9 +10,6 @@
 using namespace std;
 auto start = chrono::steady_clock::now();
 
-string fasta_path = "example_data/mini_cdna_CRCh37";
-string fastq_path = "example_data/sim_1.fq";
-//string fastq_path = "example_data/small/myfastq.fastq";
 const char *database_path = "transcript_reference_index.sqlite";
 vector<double> similarity_scores;
 
@@ -25,6 +22,8 @@ double penalty_cutoff;
 double mismatch_penalty;
 double gap_opening_penalty;
 double gap_continuing_penalty;
+string fasta_path;
+string fastq_path;
 
 using Record = vector<string>;
 using Records = vector<Record>;
@@ -173,6 +172,8 @@ int main(int argc, char *argv[]) {
 			("v,verbose",
 			 "Set verbosity level, 0 is no output, 1 is CSV of results, 2 is quant scores, 3 is read alignment",
 			 cxxopts::value<int>()->default_value("3"))
+			("a,fasta", "reference transcriptome input", cxxopts::value<string>())
+			("q,fastq", "reads input", cxxopts::value<string>())
 			("k,kmer-size", "kmer size to search fasta", cxxopts::value<int>())
 			("c,cutoff", "cutoff above which read with this penalty won't be quantified", cxxopts::value<int>())
 			("g,max-gap", "maximum gapsize to look for gaps", cxxopts::value<int>())
@@ -184,6 +185,8 @@ int main(int argc, char *argv[]) {
 	::skip_quant = result["skip-quant"].as<bool>();
 	::skip_database_creation = result["skip-db"].as<bool>();
 	::verbosity_level = result["verbose"].as<int>();
+	::fasta_path = result["fasta"].as<string>();
+	::fastq_path = result["fastq"].as<string>();
 	::kmer_size = result["kmer-size"].as<int>();
 	::max_gap_size = result["max-gap"].as<int>();
 	::penalty_cutoff = result["cutoff"].as<int>();
