@@ -223,6 +223,9 @@ int main(int argc, char *argv[]) {
 		sql_command = "CREATE TABLE IF NOT EXISTS ref_table(id INTEGER PRIMARY KEY  AUTOINCREMENT, quant INTEGER, header TEXT, transcripts VARCHAR(80));";
 		sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
 
+		sqlite3_exec(db, "PRAGMA cache_size=10000", NULL, NULL, NULL);
+		sqlite3_exec(db, "BEGIN TRANSACTION", NULL, NULL, NULL);
+
 
 		string line;
 		string current_header;
@@ -241,6 +244,7 @@ int main(int argc, char *argv[]) {
 				sqlite3_exec(db, sql_command.c_str(), callback, 0, NULL);
 			}
 		}
+		sqlite3_exec(db, "END TRANSACTION", NULL, NULL, NULL);
 
 		// Index database for log n lookup times
 		sql_command = "CREATE INDEX index_name ON ref_table (transcripts);";
