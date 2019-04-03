@@ -165,7 +165,7 @@ static int callback(void *NotUsed, int argc, char **argv, char **azColName) {
 
 
 int main(int argc, char *argv[]) {
-	cxxopts::Options options("MyProgram", "One line description of MyProgram");
+	cxxopts::Options options("GRu-Mo", "Grouped Read unifier, mapping optimiser");
 	options.add_options()
 			("skip-db", "Skip fasta parsing and database construction", cxxopts::value<bool>()->default_value("false"))
 			("skip-quant", "Skip quant, just build index database", cxxopts::value<bool>()->default_value("false"))
@@ -182,6 +182,12 @@ int main(int argc, char *argv[]) {
 			("e,gap-extend", "penalty for extending a gap", cxxopts::value<int>());
 
 	auto result = options.parse(argc, argv);
+
+	if (result.count("help") || result.arguments().size() < 1) {
+		std::cout << options.help() << std::endl;
+		exit(0);
+	}
+
 	::skip_quant = result["skip-quant"].as<bool>();
 	::skip_database_creation = result["skip-db"].as<bool>();
 	::verbosity_level = result["verbose"].as<int>();
